@@ -38,10 +38,10 @@
 
 **Forbidden scope**: All application/test/UI sources; Cabal metadata; other workflows; specs, `gate.sh`, PR metadata, and ruleset state.
 
-- [ ] T007 [US2] Add structural CI contract assertions to the `workflow-lint` surface in `nix/checks.nix` and record RED against the old `.github/workflows/ci.yml` before changing it.
-- [ ] T008 [US2] Replace `.github/workflows/ci.yml` with unconditional `Build Gate`, Haskell, formatting, HLint, Cabal package, PureScript UI, workflow lint, dev-shell, and Darwin jobs using the exact contract names.
-- [ ] T009 [US2] Make Linux jobs in `.github/workflows/ci.yml` run on `nixos`, depend on `build-gate`, and orchestrate focused flake apps while preserving the separate real `nix develop` build and macOS Darwin exception.
-- [ ] T010 [US2] Record GREEN structural workflow proof, actionlint/shellcheck exit `0`, full `./gate.sh` exit `0`, and navigator verification in ignored `WIP.md` and paired runtime status before commit.
+- [X] T007 [US2] Add structural CI contract assertions to the `workflow-lint` surface in `nix/checks.nix` and record RED against the old `.github/workflows/ci.yml` before changing it.
+- [X] T008 [US2] Replace `.github/workflows/ci.yml` with unconditional `Build Gate`, Haskell, formatting, HLint, Cabal package, PureScript UI, workflow lint, dev-shell, and Darwin jobs using the exact contract names.
+- [X] T009 [US2] Make Linux jobs in `.github/workflows/ci.yml` run on `nixos`, depend on `build-gate`, and orchestrate focused flake apps while preserving the separate real `nix develop` build and macOS Darwin exception.
+- [X] T010 [US2] Record GREEN structural workflow proof, actionlint/shellcheck exit `0`, full `./gate.sh` exit `0`, and navigator verification in ignored `WIP.md` and paired runtime status before commit.
 
 **Commit**: `ci: align GitHub Actions with flake checks`
 
