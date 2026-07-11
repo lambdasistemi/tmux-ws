@@ -1,5 +1,10 @@
 module AgentDaemon.Tmux
-    ( createSession
+    ( PreparedTmuxClose
+    , TmuxCloseFailure (..)
+    , TmuxCloseResult (..)
+    , prepareCurrentClose
+    , executeCurrentClose
+    , createSession
     , killSession
     , listSessions
     , listPanes
@@ -24,6 +29,18 @@ module AgentDaemon.Tmux
 -- inside a named tmux session that persists across terminal
 -- disconnects.
 
+import AgentDaemon.Close
+    ( CloseConsequence (..)
+    , CloseFailure (..)
+    , CloseOutcome (..)
+    , CloseScope (..)
+    , CloseTopology (..)
+    , CloseWindow (..)
+    , PreparedClose
+    , executeClose
+    , prepareClose
+    )
+import AgentDaemon.Close qualified as Close
 import AgentDaemon.Types
     ( PaneId (..)
     , PaneInfo (..)
@@ -31,6 +48,8 @@ import AgentDaemon.Types
     , WindowInfo (..)
     )
 import Control.Exception (IOException, try)
+import Data.List (groupBy, nub)
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.Exit (ExitCode (..))
@@ -40,6 +59,406 @@ import System.Process
     , readProcessWithExitCode
     )
 import Text.Read (readMaybe)
+
+-- | Opaque, internally targeted close prepared from live tmux state.
+data PreparedTmuxClose
+    = PreparedTmuxClose
+        Text
+        CloseScope
+        PreparedClose
+        Text
+        Text
+        (Maybe Text)
+        Int
+        Int
+        CloseConsequence
+
+-- | Failure at the live tmux close boundary.
+data TmuxCloseFailure
+    = TmuxCloseStaleCurrentContext
+    | TmuxCloseUnavailable Text
+    | TmuxCloseProcessFailure Text
+    | TmuxCloseParseFailure Text
+    deriving stock (Eq, Show)
+
+-- | Truthful result of executing a prepared close.
+data TmuxCloseResult = TmuxCloseResult
+    { tmuxCloseConsequence :: CloseConsequence
+    , tmuxCloseSessionEnded :: Bool
+    }
+    deriving stock (Eq, Show)
+
+{- | Prepare a current-only close from one live topology snapshot.
+
+The returned value is opaque so callers cannot forge a later target.
+-}
+prepareCurrentClose
+    :: Text
+    -> CloseScope
+    -> IO (Either TmuxCloseFailure PreparedTmuxClose)
+prepareCurrentClose sessionName scope = do
+    topologyResult <- queryCloseTopology sessionName
+    pure $ do
+        topology <- topologyResult
+        prepared <-
+            either
+                (const $ Left $ TmuxCloseParseFailure "invalid tmux topology")
+                Right
+                (prepareClose scope topology)
+        consequence <-
+            case snd $ executeClose prepared topology of
+                Right CloseOutcome{outcomeConsequence} -> Right outcomeConsequence
+                Left _ -> Left $ TmuxCloseParseFailure "invalid prepared topology"
+        let currentWindow = topologyCurrentWindow topology
+            currentPane = currentPaneFor currentWindow topology
+            windowCount = NE.length $ topologyWindows topology
+            paneCount = currentWindowPaneCount currentWindow topology
+        Right $
+            PreparedTmuxClose
+                sessionName
+                scope
+                prepared
+                (renderSessionId $ topologySession topology)
+                (renderWindowId currentWindow)
+                (renderPaneId <$> currentPane)
+                windowCount
+                paneCount
+                consequence
+
+{- | Execute an opaque prepared close.
+
+Fresh tmux state must match the prepared model before a single atomic
+tmux conditional is allowed to close the internally recorded target.
+-}
+executeCurrentClose
+    :: Text
+    -> PreparedTmuxClose
+    -> IO (Either TmuxCloseFailure TmuxCloseResult)
+executeCurrentClose
+    sessionName
+    prepared
+        | sessionName /= preparedName prepared =
+            pure $ Left TmuxCloseStaleCurrentContext
+        | otherwise = do
+            freshResult <- queryCloseTopology sessionName
+            case freshResult of
+                Left failure -> pure $ Left failure
+                Right fresh ->
+                    case validatePrepared prepared fresh of
+                        Left failure -> pure $ Left failure
+                        Right () -> runPreparedClose prepared
+
+preparedName :: PreparedTmuxClose -> Text
+preparedName (PreparedTmuxClose name _ _ _ _ _ _ _ _) = name
+
+validatePrepared
+    :: PreparedTmuxClose
+    -> CloseTopology
+    -> Either TmuxCloseFailure ()
+validatePrepared (PreparedTmuxClose _ _ model _ _ _ _ _ _) fresh =
+    case snd $ executeClose model fresh of
+        Left StaleCurrentContext -> Left TmuxCloseStaleCurrentContext
+        Left ConfirmationConsumed -> Left TmuxCloseStaleCurrentContext
+        Left InvalidTopology ->
+            Left $ TmuxCloseParseFailure "invalid fresh tmux topology"
+        Right _ -> Right ()
+
+runPreparedClose
+    :: PreparedTmuxClose
+    -> IO (Either TmuxCloseFailure TmuxCloseResult)
+runPreparedClose
+    ( PreparedTmuxClose
+            _
+            scope
+            _
+            sessionId
+            windowId
+            paneId
+            windowCount
+            paneCount
+            consequence
+        ) = do
+        result <-
+            try $
+                readProcessWithExitCode
+                    "tmux"
+                    [ "if-shell"
+                    , "-F"
+                    , "-t"
+                    , T.unpack sessionId
+                    , T.unpack $
+                        closeCondition
+                            scope
+                            sessionId
+                            windowId
+                            paneId
+                            windowCount
+                            paneCount
+                    , T.unpack $ closeCommand scope windowId paneId
+                    , "run-shell 'exit 71'"
+                    ]
+                    ""
+        pure $ case result of
+            Left exception ->
+                Left $
+                    TmuxCloseProcessFailure $
+                        "tmux if-shell failed: "
+                            <> T.pack (show (exception :: IOException))
+            Right (ExitFailure 71, _, _) ->
+                Left TmuxCloseStaleCurrentContext
+            Right (ExitFailure code, _, stderr) ->
+                Left $
+                    TmuxCloseProcessFailure $
+                        "tmux if-shell failed ("
+                            <> T.pack (show code)
+                            <> "): "
+                            <> T.strip (T.pack stderr)
+            Right (ExitSuccess, _, _) ->
+                Right
+                    TmuxCloseResult
+                        { tmuxCloseConsequence = consequence
+                        , tmuxCloseSessionEnded = consequence == SessionEnded
+                        }
+
+closeCondition
+    :: CloseScope
+    -> Text
+    -> Text
+    -> Maybe Text
+    -> Int
+    -> Int
+    -> Text
+closeCondition scope sessionId windowId paneId windowCount paneCount =
+    formatAnd $
+        [ formatEquals "#{session_id}" sessionId
+        , formatEquals "#{window_id}" windowId
+        , formatEquals "#{window_active}" "1"
+        , formatEquals "#{session_windows}" $ T.pack $ show windowCount
+        ]
+            <> paneConditions
+  where
+    paneConditions =
+        case (scope, paneId) of
+            (CloseCurrentPane, Just stablePaneId) ->
+                [ formatEquals "#{pane_id}" stablePaneId
+                , formatEquals "#{pane_active}" "1"
+                , formatEquals "#{window_panes}" $ T.pack $ show paneCount
+                ]
+            _ -> []
+
+formatEquals :: Text -> Text -> Text
+formatEquals actual expected =
+    "#{==:" <> actual <> "," <> expected <> "}"
+
+formatAnd :: [Text] -> Text
+formatAnd [] = "1"
+formatAnd [condition] = condition
+formatAnd (condition : conditions) =
+    "#{&&:" <> condition <> "," <> formatAnd conditions <> "}"
+
+closeCommand :: CloseScope -> Text -> Maybe Text -> Text
+closeCommand CloseCurrentPane _ (Just paneId) = "kill-pane -t " <> paneId
+closeCommand CloseCurrentPane _ Nothing = "run-shell 'exit 71'"
+closeCommand CloseCurrentWindow windowId _ = "kill-window -t " <> windowId
+
+currentPaneFor
+    :: Close.WindowId -> CloseTopology -> Maybe Close.PaneId
+currentPaneFor windowId CloseTopology{topologyWindows} =
+    closeWindowCurrentPane
+        <$> listHead
+            (filter ((== windowId) . closeWindowId) $ NE.toList topologyWindows)
+
+currentWindowPaneCount :: Close.WindowId -> CloseTopology -> Int
+currentWindowPaneCount windowId CloseTopology{topologyWindows} =
+    maybe 0 (NE.length . closeWindowPanes) $
+        listHead $
+            filter ((== windowId) . closeWindowId) $
+                NE.toList topologyWindows
+
+renderSessionId :: Close.SessionId -> Text
+renderSessionId (Close.SessionId identity) = "$" <> T.pack (show identity)
+
+renderWindowId :: Close.WindowId -> Text
+renderWindowId (Close.WindowId identity) = "@" <> T.pack (show identity)
+
+renderPaneId :: Close.PaneId -> Text
+renderPaneId (Close.PaneId identity) = "%" <> T.pack (show identity)
+
+data ClosePaneRow = ClosePaneRow
+    { rowSessionId :: Close.SessionId
+    , rowWindowId :: Close.WindowId
+    , rowWindowActive :: Bool
+    , rowWindowPaneCount :: Int
+    , rowPaneId :: Close.PaneId
+    , rowPaneActive :: Bool
+    }
+
+queryCloseTopology
+    :: Text -> IO (Either TmuxCloseFailure CloseTopology)
+queryCloseTopology sessionName = do
+    result <-
+        try $
+            readProcessWithExitCode
+                "tmux"
+                [ "list-panes"
+                , "-s"
+                , "-t"
+                , T.unpack sessionName
+                , "-F"
+                , T.unpack closePaneFormat
+                ]
+                ""
+    pure $ case result of
+        Left exception ->
+            Left $
+                TmuxCloseProcessFailure $
+                    "tmux list-panes failed: "
+                        <> T.pack (show (exception :: IOException))
+        Right (ExitFailure code, _, stderr)
+            | unavailableMessage stderr ->
+                Left $ TmuxCloseUnavailable $ T.strip $ T.pack stderr
+            | otherwise ->
+                Left $
+                    TmuxCloseProcessFailure $
+                        "tmux list-panes failed ("
+                            <> T.pack (show code)
+                            <> "): "
+                            <> T.strip (T.pack stderr)
+        Right (ExitSuccess, output, _) -> parseCloseTopology $ T.pack output
+
+unavailableMessage :: String -> Bool
+unavailableMessage stderr =
+    any
+        (`T.isInfixOf` message)
+        [ "can't find session"
+        , "no server running"
+        , "no sessions"
+        ]
+  where
+    message = T.toLower $ T.pack stderr
+
+parseCloseTopology :: Text -> Either TmuxCloseFailure CloseTopology
+parseCloseTopology output = do
+    rows <- traverse parseClosePaneRow $ T.lines output
+    firstRow <-
+        maybe
+            (Left $ TmuxCloseParseFailure "tmux returned an empty topology")
+            Right
+            (listHead rows)
+    windows <- traverse rowsToWindow $ groupBy sameWindow rows
+    nonEmptyWindows <-
+        maybe
+            (Left $ TmuxCloseParseFailure "tmux returned no windows")
+            Right
+            (NE.nonEmpty windows)
+    currentWindow <-
+        exactlyOne "active window" id $
+            nub $
+                rowWindowId <$> filter rowWindowActive rows
+    pure
+        CloseTopology
+            { topologySession = rowSessionId firstRow
+            , topologyWindows = nonEmptyWindows
+            , topologyCurrentWindow = currentWindow
+            }
+  where
+    sameWindow left right = rowWindowId left == rowWindowId right
+
+rowsToWindow :: [ClosePaneRow] -> Either TmuxCloseFailure CloseWindow
+rowsToWindow rows = do
+    firstRow <-
+        maybe
+            (Left $ TmuxCloseParseFailure "tmux returned an empty window")
+            Right
+            (listHead rows)
+    panes <-
+        maybe
+            (Left $ TmuxCloseParseFailure "tmux returned a window without panes")
+            Right
+            (NE.nonEmpty $ rowPaneId <$> rows)
+    if rowWindowPaneCount firstRow /= length rows
+        then Left $ TmuxCloseParseFailure "tmux window pane count mismatch"
+        else do
+            currentPane <-
+                exactlyOne "active pane" rowPaneId $ filter rowPaneActive rows
+            pure
+                CloseWindow
+                    { closeWindowId = rowWindowId firstRow
+                    , closeWindowPanes = panes
+                    , closeWindowCurrentPane = currentPane
+                    }
+
+parseClosePaneRow :: Text -> Either TmuxCloseFailure ClosePaneRow
+parseClosePaneRow line =
+    case T.splitOn "\t" line of
+        [ sessionText
+            , windowText
+            , windowActiveText
+            , paneCountText
+            , paneText
+            , paneActiveText
+            ] ->
+                ClosePaneRow
+                    <$> parseStableId "$" Close.SessionId sessionText
+                    <*> parseStableId "@" Close.WindowId windowText
+                    <*> parseCloseBool "window_active" windowActiveText
+                    <*> parseCloseInt "window_panes" paneCountText
+                    <*> parseStableId "%" Close.PaneId paneText
+                    <*> parseCloseBool "pane_active" paneActiveText
+        _ ->
+            Left $
+                TmuxCloseParseFailure $
+                    "unexpected tmux close metadata: " <> line
+
+parseStableId
+    :: Text
+    -> (Int -> a)
+    -> Text
+    -> Either TmuxCloseFailure a
+parseStableId prefix constructor raw =
+    case T.stripPrefix prefix raw of
+        Nothing ->
+            Left $
+                TmuxCloseParseFailure $
+                    "invalid stable identity prefix: " <> raw
+        Just numeric -> constructor <$> parseCloseInt "stable identity" numeric
+
+parseCloseInt :: Text -> Text -> Either TmuxCloseFailure Int
+parseCloseInt field raw =
+    maybe
+        (Left $ TmuxCloseParseFailure $ "invalid " <> field <> ": " <> raw)
+        Right
+        (readMaybe $ T.unpack raw)
+
+parseCloseBool :: Text -> Text -> Either TmuxCloseFailure Bool
+parseCloseBool field = \case
+    "0" -> Right False
+    "1" -> Right True
+    raw -> Left $ TmuxCloseParseFailure $ "invalid " <> field <> ": " <> raw
+
+exactlyOne
+    :: Text
+    -> (a -> b)
+    -> [a]
+    -> Either TmuxCloseFailure b
+exactlyOne _ project [value] = Right $ project value
+exactlyOne label _ _ = Left $ TmuxCloseParseFailure $ "expected exactly one " <> label
+
+listHead :: [a] -> Maybe a
+listHead [] = Nothing
+listHead (value : _) = Just value
+
+closePaneFormat :: Text
+closePaneFormat =
+    T.intercalate
+        "\t"
+        [ "#{session_id}"
+        , "#{window_id}"
+        , "#{window_active}"
+        , "#{window_panes}"
+        , "#{pane_id}"
+        , "#{pane_active}"
+        ]
 
 {- | Create a new detached tmux session.
 
