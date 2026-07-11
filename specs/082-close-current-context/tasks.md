@@ -13,9 +13,9 @@ Trailer: `Tasks: T001, T002, T003`
 
 ## Slice 2 — Tmux live-boundary primitives
 
-- [ ] T004 Add internal current-context snapshot queries and conditional current-pane/current-window close primitives that fail closed on mismatch.
-- [ ] T005 Prove both actions, survivor selection, last-pane/window/session behavior, and deliberate races with disposable tmux sessions.
-- [ ] T006 Pass focused live Haskell tests and `./gate.sh` without exposing a client target surface.
+- [x] T004 Add internal current-context snapshot queries and conditional current-pane/current-window close primitives that fail closed on mismatch.
+- [x] T005 Prove both actions, survivor selection, last-pane/window/session behavior, and deliberate races with disposable tmux sessions.
+- [x] T006 Pass focused live Haskell tests and `./gate.sh` without exposing a client target surface.
 
 Commit: `feat: close current tmux contexts safely`  
 Trailer: `Tasks: T004, T005, T006`
