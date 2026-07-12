@@ -271,8 +271,8 @@ let
           "$(jq -r '.packages["."]."bump-minor-pre-major"' "$release_config")" \
           true 'pre-major minor bump'
         assert_eq \
-          "$(jq -r '.packages["."]."bump-patch-for-minor-pre-major"' "$release_config")" \
-          true 'pre-major patch bump'
+          "$(jq -r '.packages["."] | if has("bump-patch-for-minor-pre-major") then ."bump-patch-for-minor-pre-major" == false else true end' "$release_config")" \
+          true 'pre-major feature-minor conversion is absent or false'
         assert_eq \
           "$(jq -r 'has("skip-labeling")' "$release_config")" \
           false 'release config omits unsupported skip-labeling property'
