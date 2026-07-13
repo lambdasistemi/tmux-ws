@@ -37,16 +37,16 @@ jobs:
             *) printf 'invalid manifest version: %s\n' "$version" >&2; exit 1 ;;
           esac
 
-          sed -E -i.bak "s/^(version:[[:space:]]*).*/\\1${version}/" agent-daemon.cabal
-          rm agent-daemon.cabal.bak
+          sed -E -i.bak "s/^(version:[[:space:]]*).*/\\1${version}/" tmux-ws.cabal
+          rm tmux-ws.cabal.bak
 
-          if git diff --quiet -- agent-daemon.cabal; then
+          if git diff --quiet -- tmux-ws.cabal; then
             exit 0
           fi
 
-          test "$(awk '$1 == "version:" { print $2; exit }' agent-daemon.cabal)" = "$version"
+          test "$(awk '$1 == "version:" { print $2; exit }' tmux-ws.cabal)" = "$version"
           git config user.name "lambdasistemi-ci[bot]"
           git config user.email "github-actions@github.com"
-          git add agent-daemon.cabal
+          git add tmux-ws.cabal
           git commit -m "chore: sync Cabal version to ${version}"
           git push origin "HEAD:${GITHUB_HEAD_REF}"

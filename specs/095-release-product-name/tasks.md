@@ -28,9 +28,9 @@ author recovery without PR-side publication.
 proof verifies canonical archive/formula/smoke and accepted authors, while
 false authors remain rejected.
 
-- [ ] T004 [US2] Add RED archive/formula/author-selector checks in `nix/checks.nix`, including positive and negative GitHub App author examples.
-- [ ] T005 [US2] Update `.github/workflows/darwin-release.yml` to generate the canonical `tmux-ws` archive and Homebrew formula plus a deprecated legacy formula route, retaining tag-only publication and existing hardening.
-- [ ] T006 [US2] Update `.github/workflows/release.yml`, `.github/workflows/sync-cabal-version.yml` if manifest rename requires it, and `nix/checks.nix` so recovery accepts exactly both App forms and a non-publishing Darwin/Homebrew smoke is required.
+- [x] T004 [US2] Add RED archive/formula/author-selector checks in `nix/checks.nix`, including positive and negative GitHub App author examples.
+- [x] T005 [US2] Update `.github/workflows/darwin-release.yml` to generate the canonical `tmux-ws` archive and Homebrew formula plus a deprecated legacy formula route, retaining tag-only publication and existing hardening.
+- [x] T006 [US2] Update `.github/workflows/release.yml`, `.github/workflows/sync-cabal-version.yml` if manifest rename requires it, and `nix/checks.nix` so recovery accepts exactly both App forms and a non-publishing Darwin/Homebrew smoke is required.
 
 ## Phase 3: User Story 3 — Follow current installation and service documentation (P2)
 
