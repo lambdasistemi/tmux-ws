@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/lambdasistemi/tmux-ws/compare/v0.3.0...v0.3.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **package:** make tmux-ws the canonical executable ([68aae6f](https://github.com/lambdasistemi/tmux-ws/commit/68aae6fedb2a8e586486fe60771eac97ef23937e))
+* **release:** publish tmux-ws distribution surfaces ([31919f2](https://github.com/lambdasistemi/tmux-ws/commit/31919f28ded652a05d3cb7df02cc0eba93dc434b))
+* ship releases under the tmux-ws product name ([1e2997b](https://github.com/lambdasistemi/tmux-ws/commit/1e2997b4b3ab7b1cd35d6d7686e1e649e195074c))
+
 ## [0.3.0](https://github.com/lambdasistemi/tmux-ws/compare/v0.2.0...v0.3.0) (2026-07-13)
 
 
