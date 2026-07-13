@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   build-and-release:
-    name: Publish agent-daemon for aarch64-darwin
+    name: Publish tmux-ws for aarch64-darwin
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
@@ -56,7 +56,7 @@ jobs:
 
           tag_version="${TAG#v}"
           manifest_version="$(jq -er '."."' .release-please-manifest.json)"
-          cabal_version="$(awk '$1 == "version:" { print $2; exit }' agent-daemon.cabal)"
+          cabal_version="$(awk '$1 == "version:" { print $2; exit }' tmux-ws.cabal)"
 
           test -n "$cabal_version"
           test "$tag_version" = "$manifest_version"
@@ -76,18 +76,18 @@ jobs:
         run: |
           nix build -L --no-link --print-out-paths > "$RUNNER_TEMP/nix-out"
           test "$(wc -l < "$RUNNER_TEMP/nix-out")" -eq 1
-          test -x "$(cat "$RUNNER_TEMP/nix-out")/bin/agent-daemon"
+          test -x "$(cat "$RUNNER_TEMP/nix-out")/bin/tmux-ws"
 
       - name: Bundle and smoke installed layout
         run: |
           bundle="$RUNNER_TEMP/bundle"
-          binary="$bundle/bin/agent-daemon"
+          binary="$bundle/bin/tmux-ws"
           libdir="$bundle/libexec/lib"
           queue="$RUNNER_TEMP/dylib-queue"
           origins="$RUNNER_TEMP/dylib-origins"
 
           mkdir -p "$bundle/bin" "$libdir"
-          cp "$(cat "$RUNNER_TEMP/nix-out")/bin/agent-daemon" "$binary"
+          cp "$(cat "$RUNNER_TEMP/nix-out")/bin/tmux-ws" "$binary"
           chmod u+w "$binary"
           : > "$queue"
           : > "$origins"
@@ -156,7 +156,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          asset="$RUNNER_TEMP/agent-daemon-${VERSION}-aarch64-darwin.tar.gz"
+          asset="$RUNNER_TEMP/tmux-ws-${VERSION}-aarch64-darwin.tar.gz"
           COPYFILE_DISABLE=1 tar -czf "$asset" -C "$RUNNER_TEMP/bundle" .
           sha="$(shasum -a 256 "$asset" | awk '{ print $1 }')"
           printf '%s  %s\n' "$sha" "$(basename "$asset")"
@@ -187,20 +187,21 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           SHA256: ${{ steps.asset.outputs.sha256 }}
         run: |
-          url="https://github.com/lambdasistemi/tmux-ws/releases/download/${TAG}/agent-daemon-${VERSION}-aarch64-darwin.tar.gz"
+          url="https://github.com/lambdasistemi/tmux-ws/releases/download/${TAG}/tmux-ws-${VERSION}-aarch64-darwin.tar.gz"
 
-          printf 'class AgentDaemon < Formula\n  desc "WebSocket daemon for managing tmux workspaces"\n  homepage "https://github.com/lambdasistemi/tmux-ws"\n  url "%s"\n  sha256 "%s"\n  version "%s"\n\n  def install\n    bin.install "bin/agent-daemon"\n    (libexec/"lib").install Dir["libexec/lib/*"]\n  end\n\n  test do\n    system "#{bin}/agent-daemon", "--help"\n  end\nend\n' \
-            "$url" "$SHA256" "$VERSION" > "$RUNNER_TEMP/agent-daemon.rb"
+          bash scripts/render-homebrew-formulas.sh \
+            "$RUNNER_TEMP" "$url" "$SHA256" "$VERSION"
 
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/lambdasistemi/homebrew-tap.git" "$RUNNER_TEMP/tap"
           mkdir -p "$RUNNER_TEMP/tap/Formula"
+          cp "$RUNNER_TEMP/tmux-ws.rb" "$RUNNER_TEMP/tap/Formula/tmux-ws.rb"
           cp "$RUNNER_TEMP/agent-daemon.rb" "$RUNNER_TEMP/tap/Formula/agent-daemon.rb"
           cd "$RUNNER_TEMP/tap"
           git config user.name "lambdasistemi-ci[bot]"
           git config user.email "github-actions@github.com"
-          git add Formula/agent-daemon.rb
+          git add Formula/tmux-ws.rb Formula/agent-daemon.rb
           if ! git diff --cached --quiet; then
-            git commit -m "update agent-daemon to ${TAG}"
+            git commit -m "update tmux-ws to ${TAG}"
           fi
           git push
 
@@ -208,7 +209,7 @@ jobs:
         run: |
           brew tap lambdasistemi/tap
           brew trust lambdasistemi/tap
-          brew install --formula lambdasistemi/tap/agent-daemon
-          agent-daemon --help
-          command -v agent-daemon
-          otool -L "$(command -v agent-daemon)"
+          brew install --formula lambdasistemi/tap/tmux-ws
+          tmux-ws --help
+          command -v tmux-ws
+          otool -L "$(command -v tmux-ws)"

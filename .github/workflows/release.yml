@@ -68,7 +68,7 @@ jobs:
           matches="$RUNNER_TEMP/recovery-prs.json"
           jq '[.[][] | select(
             .merged_at != null and
-            .user.login == "lambdasistemi-ci[bot]" and
+            (.user.login == "lambdasistemi-ci[bot]" or .user.login == "app/lambdasistemi-ci") and
             .base.ref == "main" and
             .head.ref == "release-please--branches--main"
           )]' "$pull_requests" > "$matches"
@@ -94,7 +94,7 @@ jobs:
             printf 'release metadata mismatch: generated PR title\n' >&2
             exit 1
           fi
-          if test "$(awk '$1 == "version:" { print $2; exit }' agent-daemon.cabal)" != "$version"; then
+          if test "$(awk '$1 == "version:" { print $2; exit }' tmux-ws.cabal)" != "$version"; then
             printf 'release metadata mismatch: Cabal version\n' >&2
             exit 1
           fi
@@ -159,7 +159,7 @@ jobs:
           false_pr_numbers="$RUNNER_TEMP/false-release-pr-numbers"
           if ! jq -r --arg started_at "$RECOVERY_STARTED_AT" '
             .[] | select(
-              .author.login == "lambdasistemi-ci[bot]" and
+              (.author.login == "lambdasistemi-ci[bot]" or .author.login == "app/lambdasistemi-ci") and
               .createdAt >= $started_at
             ) | .number
           ' "$false_prs" > "$false_pr_numbers"; then

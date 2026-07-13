@@ -43,7 +43,7 @@ jobs:
               'let
                 lines = builtins.filter builtins.isString
                   (builtins.split "\n"
-                    (builtins.readFile ./agent-daemon.cabal));
+                    (builtins.readFile ./tmux-ws.cabal));
                 matches = builtins.filter (match: match != null)
                   (map
                     (line: builtins.match
@@ -167,3 +167,38 @@ jobs:
             extra-trusted-public-keys = paolino.cachix.org-1:ecmgO3CXdgSWA2cHlm4srknd/cLFMLmK3i3NrzeDFaE=
       - name: Build
         run: nix build -L
+
+      - name: Verify rendered Homebrew formula compatibility route
+        run: |
+          set -euo pipefail
+          tap=local/tmux-ws-red
+          brew tap-new "$tap"
+          trap 'brew untap --force "$tap"' EXIT
+          formulas="$(brew --repository "$tap")/Formula"
+          bundle="$RUNNER_TEMP/tmux-ws-bundle"
+          archive="$RUNNER_TEMP/tmux-ws-0.3.0-aarch64-darwin.tar.gz"
+          mkdir -p "$bundle/bin" "$bundle/libexec/lib"
+          cp result/bin/tmux-ws "$bundle/bin/tmux-ws"
+          COPYFILE_DISABLE=1 tar -czf "$archive" -C "$bundle" .
+          sha256="$(shasum -a 256 "$archive" | awk '{ print $1 }')"
+          bash scripts/render-homebrew-formulas.sh \
+            "$formulas" \
+            "file://$archive" \
+            "$sha256" \
+            0.3.0
+          brew install --formula "$tap/tmux-ws"
+          brew install --formula "$tap/agent-daemon"
+          tmux-ws --help
+          agent-daemon --help
+          agent_daemon_prefix="$(brew --prefix "$tap/agent-daemon")"
+          agent_daemon_link="$agent_daemon_prefix/bin/agent-daemon"
+          tmux_ws_link="$(brew --prefix tmux-ws)/bin/tmux-ws"
+          test -L "$agent_daemon_link"
+          test ! -e "$agent_daemon_prefix/bin/tmux-ws"
+          agent_daemon_target="$(readlink "$agent_daemon_link")"
+          agent_daemon_identity="$(stat -L -f '%d:%i' "$agent_daemon_link")"
+          tmux_ws_identity="$(stat -L -f '%d:%i' "$tmux_ws_link")"
+          printf 'agent-daemon link: %s -> %s\n' "$agent_daemon_link" "$agent_daemon_target"
+          printf 'agent-daemon resolved identity: %s\n' "$agent_daemon_identity"
+          printf 'tmux-ws resolved identity: %s\n' "$tmux_ws_identity"
+          test "$agent_daemon_identity" = "$tmux_ws_identity"

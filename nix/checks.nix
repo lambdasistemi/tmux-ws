@@ -2,9 +2,11 @@
 let
   scripts = {
     haskell-build = {
-      runtimeInputs = [ components.exes.agent-daemon ];
+      runtimeInputs = [ components.exes.tmux-ws components.exes.agent-daemon ];
       text = ''
         test -e ${components.library}
+        test -x ${components.exes.tmux-ws}/bin/tmux-ws
+        tmux-ws --help >/dev/null
         test -x ${components.exes.agent-daemon}/bin/agent-daemon
         agent-daemon --help >/dev/null
       '';
@@ -40,7 +42,7 @@ let
         pkgs.nixfmt-classic
       ];
       text = ''
-        diff -u agent-daemon.cabal <(cabal-fmt agent-daemon.cabal)
+        diff -u tmux-ws.cabal <(cabal-fmt tmux-ws.cabal)
         find src app -type f -name '*.hs' -exec fourmolu -m check {} +
         nixfmt --check flake.nix nix/*.nix
       '';
@@ -100,6 +102,7 @@ let
         sync_workflow=.github/workflows/sync-cabal-version.yml
         manifest=.release-please-manifest.json
         release_config=release-please-config.json
+        dollar='$'
 
         assert_eq() {
           local actual="$1"
@@ -264,7 +267,7 @@ let
           "$version_preflight" \
           'CI manifest drift guard'
 
-        assert_version_contract "$manifest" agent-daemon.cabal current
+        assert_version_contract "$manifest" tmux-ws.cabal current
         future_version_dir="$(mktemp -d)"
         trap 'rm -rf "$future_version_dir"' EXIT
         printf '{".":"0.2.0"}\n' > "$future_version_dir/manifest.json"
@@ -416,7 +419,22 @@ let
         # shellcheck disable=SC2016
         grep -Fq '"$binary" --help' "$darwin_workflow"
         grep -Fq 'brew trust lambdasistemi/tap' "$darwin_workflow"
-        grep -Fq 'agent-daemon --help' "$darwin_workflow"
+        grep -Fq 'tmux-ws.cabal' "$darwin_workflow"
+        grep -Fq "tmux-ws-$dollar{VERSION}-aarch64-darwin.tar.gz" "$darwin_workflow"
+        grep -Fq 'bin/tmux-ws' "$darwin_workflow"
+        grep -Fq 'bash scripts/render-homebrew-formulas.sh' "$darwin_workflow"
+        grep -Fq 'Formula/tmux-ws.rb' "$darwin_workflow"
+        grep -Fq 'brew install --formula lambdasistemi/tap/tmux-ws' "$darwin_workflow"
+        grep -Fq 'tmux-ws --help' "$darwin_workflow"
+        if grep -Fq 'class TmuxWs < Formula' "$darwin_workflow" \
+          || grep -Fq 'class AgentDaemon < Formula' "$darwin_workflow"; then
+          echo 'workflow contract: Darwin formula semantics must live in the shared renderer' >&2
+          exit 1
+        fi
+        if grep -Fq 'bin.write_exec_script Formula["tmux-ws"].opt_bin/"tmux-ws"' "$darwin_workflow"; then
+          echo 'workflow contract: legacy formula must not install a conflicting wrapper' >&2
+          exit 1
+        fi
 
         assert_eq \
           "$(yq -r \
@@ -438,6 +456,243 @@ let
         # Assert literal workflow source; expansion would make this weaker.
         # shellcheck disable=SC2016
         grep -Fq 'git push origin "HEAD:''${GITHUB_HEAD_REF}"' "$sync_workflow"
+      '';
+    };
+
+    release-product-name = {
+      runtimeInputs =
+        [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnutar pkgs.jq ];
+      text = ''
+        set -euo pipefail
+
+        darwin_workflow=.github/workflows/darwin-release.yml
+        release_workflow=.github/workflows/release.yml
+        sync_workflow=.github/workflows/sync-cabal-version.yml
+        ci_workflow=.github/workflows/ci.yml
+        renderer=scripts/render-homebrew-formulas.sh
+        dollar='$'
+        failures=0
+
+        require_literal() {
+          local file="$1"
+          local literal="$2"
+          local label="$3"
+
+          if ! grep -Fq "$literal" "$file"; then
+            printf 'release product contract: missing %s\n' "$label" >&2
+            failures=1
+          fi
+        }
+
+        reject_literal() {
+          local file="$1"
+          local literal="$2"
+          local label="$3"
+
+          if grep -Fq "$literal" "$file"; then
+            printf 'release product contract: forbidden %s\n' "$label" >&2
+            failures=1
+          fi
+        }
+
+        require_literal "$darwin_workflow" 'tmux-ws.cabal' 'Darwin tmux-ws Cabal manifest'
+        require_literal "$darwin_workflow" 'bin/tmux-ws' 'Darwin primary binary'
+        require_literal "$darwin_workflow" "tmux-ws-$dollar{VERSION}-aarch64-darwin.tar.gz" 'Darwin primary archive'
+        require_literal "$darwin_workflow" 'bash scripts/render-homebrew-formulas.sh' 'Darwin shared Homebrew renderer invocation'
+        require_literal "$darwin_workflow" 'brew install --formula lambdasistemi/tap/tmux-ws' 'primary Homebrew install'
+        require_literal "$darwin_workflow" 'tmux-ws --help' 'primary Homebrew smoke'
+        reject_literal "$darwin_workflow" 'class TmuxWs < Formula' 'inline primary Homebrew formula semantics'
+        reject_literal "$darwin_workflow" 'class AgentDaemon < Formula' 'inline legacy Homebrew formula semantics'
+        reject_literal "$darwin_workflow" 'bin.write_exec_script Formula["tmux-ws"].opt_bin/"tmux-ws"' 'legacy formula conflicting wrapper'
+        require_literal "$release_workflow" '.user.login == "app/lambdasistemi-ci"' 'recovery App author identity'
+        require_literal "$release_workflow" '.author.login == "app/lambdasistemi-ci"' 'cleanup App author identity'
+        require_literal "$release_workflow" 'tmux-ws.cabal' 'release recovery Cabal manifest'
+        require_literal "$sync_workflow" 'tmux-ws.cabal' 'sync Cabal manifest'
+        require_literal "$ci_workflow" './tmux-ws.cabal' 'CI Cabal manifest'
+        # Assert literal workflow source; expansion would make this weaker.
+        # shellcheck disable=SC2016
+        require_literal "$ci_workflow" 'brew tap-new "$tap"' 'temporary local Git tap registration'
+        # Assert literal workflow source; expansion would make this weaker.
+        # shellcheck disable=SC2016
+        require_literal "$ci_workflow" 'brew install --formula "$tap/agent-daemon"' 'temporary local-tap legacy formula install'
+        # Assert literal workflow source; expansion would make this weaker.
+        # shellcheck disable=SC2016
+        require_literal "$ci_workflow" 'brew install --formula "$tap/tmux-ws"' 'temporary local-tap primary formula install'
+        require_literal "$ci_workflow" 'tmux-ws --help' 'temporary local-tap primary formula smoke'
+        require_literal "$ci_workflow" 'agent-daemon --help' 'temporary local-tap legacy formula smoke'
+        # Assert literal workflow source; expansion would make this weaker.
+        # shellcheck disable=SC2016
+        require_literal "$ci_workflow" 'test ! -e "$agent_daemon_prefix/bin/tmux-ws"' 'legacy keg collision absence'
+        require_literal "$ci_workflow" "stat -L -f '%d:%i' \"\$agent_daemon_link\"" 'legacy forwarder resolved identity'
+        require_literal "$ci_workflow" "stat -L -f '%d:%i' \"\$tmux_ws_link\"" 'primary binary resolved identity'
+        require_literal "$ci_workflow" "test \"\$agent_daemon_identity\" = \"\$tmux_ws_identity\"" 'legacy forwarder resolves to primary binary'
+
+        assert_selector() {
+          local selector="$1"
+          local payload="$2"
+          local expected="$3"
+          local label="$4"
+          local actual
+
+          actual="$(printf '%s\n' "$payload" | jq -r "$selector")"
+          if test "$actual" != "$expected"; then
+            printf 'release product contract: %s: expected %s, got %s\n' \
+              "$label" "$expected" "$actual" >&2
+            failures=1
+          fi
+        }
+
+        recovery_selector='if (.user.login == "lambdasistemi-ci[bot]" or .user.login == "app/lambdasistemi-ci") then "accepted" else "rejected" end'
+        cleanup_selector='if (.author.login == "lambdasistemi-ci[bot]" or .author.login == "app/lambdasistemi-ci") then "accepted" else "rejected" end'
+        assert_selector "$recovery_selector" '{"user":{"login":"lambdasistemi-ci[bot]"}}' accepted 'recovery bot author'
+        assert_selector "$recovery_selector" '{"user":{"login":"app/lambdasistemi-ci"}}' accepted 'recovery App author'
+        assert_selector "$recovery_selector" '{"user":{"login":"unrelated-ci[bot]"}}' rejected 'recovery unrelated bot'
+        assert_selector "$cleanup_selector" '{"author":{"login":"lambdasistemi-ci[bot]"}}' accepted 'cleanup bot author'
+        assert_selector "$cleanup_selector" '{"author":{"login":"app/lambdasistemi-ci"}}' accepted 'cleanup App author'
+        assert_selector "$cleanup_selector" '{"author":{"login":"unrelated-ci[bot]"}}' rejected 'cleanup unrelated bot'
+
+        proof_root="$(mktemp -d)"
+        trap 'rm -rf "$proof_root"' EXIT
+        bundle="$proof_root/bundle"
+        mkdir -p "$bundle/bin"
+        cat > "$bundle/bin/tmux-ws" <<'EOF'
+        #!${pkgs.runtimeShell}
+        if test "$1" = --help; then
+          echo 'tmux-ws help'
+        fi
+        EOF
+        chmod +x "$bundle/bin/tmux-ws"
+
+        version=0.3.1
+        archive="$proof_root/tmux-ws-$version-aarch64-darwin.tar.gz"
+        tar -C "$bundle" -czf "$archive" .
+        test -f "$archive"
+        tar -tzf "$archive" | grep -Fx './bin/tmux-ws' >/dev/null
+        mkdir "$proof_root/extract"
+        tar -C "$proof_root/extract" -xzf "$archive"
+        "$proof_root/extract/bin/tmux-ws" --help >/dev/null
+
+        formula_dir="$proof_root/formulas"
+        bash "$renderer" \
+          "$formula_dir" \
+          "https://example.invalid/tmux-ws-$version-aarch64-darwin.tar.gz" \
+          0000000000000000000000000000000000000000000000000000000000000000 \
+          "$version"
+        formula="$formula_dir/tmux-ws.rb"
+        grep -Fqx 'class TmuxWs < Formula' "$formula"
+        grep -Fqx "  url \"https://example.invalid/tmux-ws-$version-aarch64-darwin.tar.gz\"" "$formula"
+        grep -Fqx '  sha256 "0000000000000000000000000000000000000000000000000000000000000000"' "$formula"
+        grep -Fqx "  version \"$version\"" "$formula"
+        grep -Fqx '    bin.install "bin/tmux-ws"' "$formula"
+        grep -Fqx '    system "#{bin}/tmux-ws", "--help"' "$formula"
+
+        legacy_formula="$formula_dir/agent-daemon.rb"
+        grep -Fqx 'class AgentDaemon < Formula' "$legacy_formula"
+        grep -Fqx "  url \"https://example.invalid/tmux-ws-$version-aarch64-darwin.tar.gz\"" "$legacy_formula"
+        grep -Fqx '  sha256 "0000000000000000000000000000000000000000000000000000000000000000"' "$legacy_formula"
+        grep -Fqx "  version \"$version\"" "$legacy_formula"
+        grep -Fqx '  depends_on "tmux-ws"' "$legacy_formula"
+        grep -Fqx '    bin.install_symlink Formula["tmux-ws"].opt_bin/"tmux-ws" => "agent-daemon"' "$legacy_formula"
+        grep -Fqx '      agent-daemon is deprecated; use tmux-ws.' "$legacy_formula"
+        if grep -Fq 'bin.install "bin/tmux-ws"' "$legacy_formula"; then
+          printf 'release product contract: legacy formula installs a conflicting tmux-ws binary\n' >&2
+          failures=1
+        fi
+        if grep -Fq 'bin.write_exec_script Formula["tmux-ws"].opt_bin/"tmux-ws"' "$legacy_formula"; then
+          printf 'release product contract: legacy formula has a conflicting wrapper\n' >&2
+          failures=1
+        fi
+
+        if test "$failures" -ne 0; then
+          exit 1
+        fi
+      '';
+    };
+
+    docs-service-contract = {
+      runtimeInputs = [ pkgs.coreutils pkgs.gnugrep ];
+      text = ''
+        set -euo pipefail
+
+        module=nix/module.nix
+        readme=README.md
+        docs_index=docs/index.md
+        deployment=docs/deployment.md
+        tailscale=docs/tailscale.md
+        release_guide=docs/release.md
+        mkdocs=mkdocs.yml
+        failures=0
+
+        require_literal() {
+          local file="$1"
+          local literal="$2"
+          local label="$3"
+
+          if ! grep -Fq "$literal" "$file"; then
+            printf 'docs/service contract: missing %s\n' "$label" >&2
+            failures=1
+          fi
+        }
+
+        require_file() {
+          local file="$1"
+          local label="$2"
+
+          if ! test -f "$file"; then
+            printf 'docs/service contract: missing %s\n' "$label" >&2
+            failures=1
+          fi
+        }
+
+        reject_literal() {
+          local file="$1"
+          local literal="$2"
+          local label="$3"
+
+          if grep -Fq "$literal" "$file"; then
+            printf 'docs/service contract: forbidden %s\n' "$label" >&2
+            failures=1
+          fi
+        }
+
+        require_literal "$module" 'options.services.tmux-ws' 'primary services.tmux-ws module option'
+        require_literal "$module" 'systemd.services.tmux-ws' 'primary tmux-ws systemd unit'
+        require_literal "$module" '/bin/tmux-ws' 'primary tmux-ws service binary'
+        require_literal "$module" 'mkRenamedOptionModule' 'legacy service migration route'
+        require_literal "$module" 'default = "/var/lib/agent-daemon"' 'private legacy state allowance'
+        require_literal "$module" 'default = "agent-daemon"' 'private legacy account allowance'
+        reject_literal "$module" 'systemd.services.agent-daemon' 'legacy primary systemd unit'
+        reject_literal "$module" '/bin/agent-daemon' 'legacy primary service binary'
+        require_literal "$readme" 'tmux-ws --host' 'README primary command'
+        reject_literal "$readme" 'agent-daemon' 'README legacy primary text'
+        require_literal "$docs_index" 'tmux-ws --host' 'index primary command'
+        reject_literal "$docs_index" 'agent-daemon' 'index legacy primary text'
+        require_literal "$deployment" 'services.tmux-ws' 'deployment primary service configuration'
+        reject_literal "$deployment" 'systemctl enable --now agent-daemon' 'deployment legacy service command'
+        reject_literal "$deployment" '/bin/agent-daemon' 'deployment legacy binary command'
+        require_literal "$tailscale" 'tmux-ws --host' 'Tailscale primary command'
+        reject_literal "$tailscale" 'agent-daemon --host' 'Tailscale legacy primary command'
+        require_file "$release_guide" 'release operator guide'
+        if test -f "$release_guide"; then
+        require_literal "$release_guide" 'brew install lambdasistemi/tap/tmux-ws' 'release Homebrew install command'
+          require_literal "$release_guide" 'brew update' 'release Homebrew update command'
+          require_literal "$release_guide" 'brew upgrade tmux-ws' 'release Homebrew upgrade command'
+          require_literal "$release_guide" 'brew upgrade agent-daemon' 'legacy compatibility-alias upgrade path'
+          require_literal "$release_guide" 'brew uninstall agent-daemon' 'legacy compatibility-alias removal path'
+          # Assert the Markdown code span and publication promise independently.
+          # shellcheck disable=SC2016
+          require_literal "$release_guide" '`v0.3.0`' 'immutable publication version code span'
+          require_literal "$release_guide" 'will not be rewritten or deleted' 'immutable no-rewrite/no-delete promise'
+          require_literal "$release_guide" 'v0.3.1' 'corrective publication version'
+          require_literal "$release_guide" 'update the real Homebrew tap' 'corrective tap publication boundary'
+          require_literal "$release_guide" 'corrective release' 'legacy compatibility duration'
+          require_literal "$release_guide" 'separately reviewed migration ticket' 'legacy removal policy'
+        fi
+        require_literal "$mkdocs" 'release.md' 'release guide navigation entry'
+
+        if test "$failures" -ne 0; then
+          exit 1
+        fi
       '';
     };
   };
@@ -469,5 +724,9 @@ in {
   cabal-package = mkCheck "cabal-package" scripts.cabal-package;
   ui = mkCheck "ui" scripts.ui;
   workflow-lint = mkCheck "workflow-lint" scripts.workflow-lint;
+  release-product-name =
+    mkCheck "release-product-name" scripts.release-product-name;
+  docs-service-contract =
+    mkCheck "docs-service-contract" scripts.docs-service-contract;
   inherit apps;
 }
