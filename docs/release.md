@@ -13,12 +13,14 @@ tmux-ws --help
 NixOS users should configure `services.tmux-ws` and enable the `tmux-ws`
 systemd service.
 
-`v0.3.0` is immutable and will not be rewritten or deleted. The corrective
-`v0.3.1` release will publish a new Darwin asset and update the real Homebrew tap;
-this PR itself does neither. After an upgrade, restart the daemon
-(`systemctl restart tmux-ws` on NixOS) and reload the browser document to fetch
-the updated SPA. See [deployment](deployment.md), [Tailscale HTTPS](tailscale.md),
-and the [installation guide](index.md#quick-start) for the linked operator flow.
+`v0.3.0` is immutable and remains unchanged, and will not be rewritten or deleted.
+`v0.3.1` is published with the canonical `tmux-ws-0.3.1-aarch64-darwin.tar.gz` Darwin asset and an
+updated Homebrew tap formula. The release workflow used that formula to
+update the real Homebrew tap. After an upgrade, restart the daemon
+(`systemctl restart tmux-ws` on NixOS) and
+reload the browser document on Chrome tablets to fetch the updated SPA. See
+[deployment](deployment.md), [Tailscale HTTPS](tailscale.md), and the
+[installation guide](index.md#quick-start) for the linked operator flow.
 
 ## Corrective-release compatibility
 
