@@ -36,7 +36,7 @@ requires the always-present `Docs build` context.
   job uses `nixos`; Darwin jobs remain `macos-14` and are otherwise untouched.
 - **FR-004 — README**: document purpose, touch-first/tablet orientation,
   macOS/Homebrew and Linux installation, Nix development, verification
-  commands, documentation, releases, and the BSD-3-Clause license.
+  commands, documentation, releases, and the MIT license.
 - **FR-005 — MkDocs experience**: use the canonical site/repository URLs,
   remembered OS-aware light/dark palettes, search, structured navigation,
   navigation indexes/sections/path, integrated table of contents, and code-copy

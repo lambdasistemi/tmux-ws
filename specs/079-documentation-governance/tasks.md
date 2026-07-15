@@ -13,18 +13,18 @@
 
 ## Slice 2 — touch-first onboarding and release guidance
 
-- [ ] T005-S2 Establish RED docs-contract evidence for missing onboarding,
+- [X] T005-S2 Establish RED docs-contract evidence for missing onboarding,
   navigation, touch, v0.4.0, install/upgrade, stable-link, and license content.
-- [ ] T006-S2 Complete README purpose, macOS/Linux installation, touch use,
+- [X] T006-S2 Complete README purpose, macOS/Linux installation, touch use,
   Nix development, verification, documentation, releases, and license routes.
-- [ ] T007-S2 Configure remembered light/dark palettes, canonical URLs,
+- [X] T007-S2 Configure remembered light/dark palettes, canonical URLs,
   search/navigation/path/TOC/code-copy features, and coherent user/operator/
   developer navigation.
-- [ ] T008-S2 Add accurate checksum, AppImage, apt, dnf, Homebrew, NixOS,
+- [X] T008-S2 Add accurate checksum, AppImage, apt, dnf, Homebrew, NixOS,
   upgrade/restart, and tablet hard-refresh guidance for imminent v0.4.0.
-- [ ] T009-S2 Document the tablet/small-screen SPA, modifier/arrow command deck,
+- [X] T009-S2 Document the tablet/small-screen SPA, modifier/arrow command deck,
   one-shot Tmux prefix, and close-current workflow without contradicting code.
-- [ ] T010-S2 Green focused content contracts, strict MkDocs/link validation,
+- [X] T010-S2 Green focused content contracts, strict MkDocs/link validation,
   localhost preview smoke, and the full temporary gate.
 
 ## Slice 3 — constitution and portable Speckit scaffold
