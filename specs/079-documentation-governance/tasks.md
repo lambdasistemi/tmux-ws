@@ -29,14 +29,14 @@
 
 ## Slice 3 — constitution and portable Speckit scaffold
 
-- [ ] T011-S3 Establish RED for the obsolete Agent Daemon/Haskell-only
+- [X] T011-S3 Establish RED for the obsolete Agent Daemon/Haskell-only
   constitution and tracked `.claude/commands/speckit.*` copies.
-- [ ] T012-S3 Align the constitution with current architecture, Nix-first
+- [X] T012-S3 Align the constitution with current architecture, Nix-first
   checks, testing/live-boundary policy, release invariants, runners, and linear
   history.
-- [ ] T013-S3 Remove only the approved obsolete command copies while preserving
+- [X] T013-S3 Remove only the approved obsolete command copies while preserving
   `.specify/` and unrelated guidance.
-- [ ] T014-S3 Green focused content/absence checks and the full temporary gate.
+- [X] T014-S3 Green focused content/absence checks and the full temporary gate.
 
 ## Slice 4 — wiki logbook
 
